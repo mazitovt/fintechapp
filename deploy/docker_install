@@ -1,0 +1,8 @@
+# install version
+sudo apt-get install docker-ce=5:20.10.16~3-0~ubuntu-focal docker-ce-cli=5:20.10.16~3-0~ubuntu-focal containerd.io docker-compose-plugin
+
+# start daemon
+sudo /etc/init.d/docker start
+
+# install docker-compose
+sudo apt-get install docker-compose-plugin=2.5.0~ubuntu-focal

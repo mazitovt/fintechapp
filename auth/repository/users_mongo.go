@@ -11,15 +11,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-const (
-	usersCollection = "users"
-)
-
 type UsersRepo struct {
 	db *mongo.Collection
 }
 
-func NewUsersRepo(db *mongo.Database) *UsersRepo {
+func NewUsersRepo(db *mongo.Database, usersCollection string) *UsersRepo {
 	return &UsersRepo{
 		db: db.Collection(usersCollection),
 	}
@@ -28,7 +24,7 @@ func NewUsersRepo(db *mongo.Database) *UsersRepo {
 func (r *UsersRepo) Create(ctx context.Context, user domain.User) (string, error) {
 	res, err := r.db.InsertOne(ctx, user)
 	if mongodb.IsDuplicate(err) {
-		return "", domain.ErrUserAlreadyExists
+		return "", ErrUserAlreadyExists
 	}
 
 	id, ok := res.InsertedID.(primitive.ObjectID)
@@ -36,37 +32,39 @@ func (r *UsersRepo) Create(ctx context.Context, user domain.User) (string, error
 		return "", fmt.Errorf("ERROR: res.InsertedID.(primitive.ObjectID)")
 	}
 
-	return id.String(), err
+	return id.Hex(), err
 }
 
-func (r *UsersRepo) GetByCredentials(ctx context.Context, email, password string) (domain.User, error) {
-	var user domain.User
-	if err := r.db.FindOne(ctx, bson.M{"email": email, "password": password}).Decode(&user); err != nil {
+func (r *UsersRepo) GetByCredentials(ctx context.Context, email, password string) (user domain.User, err error) {
+	if err = r.db.FindOne(ctx, bson.M{"email": email, "password": password}).Decode(&user); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return domain.User{}, domain.ErrUserNotFound
+			err = ErrUserNotFound
 		}
 
-		return domain.User{}, err
+		return
 	}
 
-	return user, nil
+	return
 }
 
-func (r *UsersRepo) GetByUserId(ctx context.Context, userId string) (domain.User, error) {
-	var user domain.User
-	if err := r.db.FindOne(ctx, bson.D{{"_id", userId}}).Decode(&user); err != nil {
+func (r *UsersRepo) GetByUserId(ctx context.Context, userId string) (user domain.User, err error) {
+	id, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		return
+	}
+	if err = r.db.FindOne(ctx, bson.M{"_id": id}).Decode(&user); err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
-			return domain.User{}, domain.ErrUserNotFound
+			err = ErrUserNotFound
 		}
 
-		return domain.User{}, err
+		return
 	}
 
-	return user, nil
+	return
 }
 
 func (r *UsersRepo) UpdateUser(ctx context.Context, user domain.User) error {
-	// TODO remove Background()
+	// TODO maybe append to array, and not rewrite it
 	_, err := r.db.UpdateOne(ctx, bson.M{"_id": user.ID}, bson.M{"$set": bson.M{"tokens": user.RefreshTokens}})
 
 	return err

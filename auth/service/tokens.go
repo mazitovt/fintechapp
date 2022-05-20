@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+type (
+	ErrEmptyToken      struct{}
+	ErrEmptySigningKey struct{}
+	ErrInvalidToken    struct{}
+	ErrInternal        struct{}
+)
+
 type JWTokenService struct {
 	accessSigningKey  string
 	refreshSigningKey string
@@ -16,7 +23,6 @@ func NewJWTokenService(accessSigningKey, refreshSigningKey string) *JWTokenServi
 	return &JWTokenService{accessSigningKey: accessSigningKey, refreshSigningKey: refreshSigningKey}
 }
 
-// TODO: ttl could be const in this package, taken from config or passed to constructor
 func (m *JWTokenService) Access(sub string, ttl time.Duration) (string, error) {
 	return m.token(sub, ttl, m.accessSigningKey)
 }
@@ -33,11 +39,13 @@ func (m *JWTokenService) ParseRefresh(tkn string) (string, error) {
 	return m.parse(tkn, m.refreshSigningKey)
 }
 
-// TODO: add custom header: refresh or access
 func (m *JWTokenService) parse(tkn string, signingKey string) (string, error) {
 
 	if tkn == "" {
 		return "", fmt.Errorf("empty access token")
+	}
+	if signingKey == "" {
+		return "", fmt.Errorf("empty signingKey")
 	}
 
 	var claims jwt.RegisteredClaims
@@ -54,14 +62,15 @@ func (m *JWTokenService) parse(tkn string, signingKey string) (string, error) {
 }
 
 func (JWTokenService) token(sub string, ttl time.Duration, signingKey string) (string, error) {
-	tkn := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
-		Subject:   sub,
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl))},
-	)
 
 	if signingKey == "" {
 		return "", fmt.Errorf("empty signingKey")
 	}
+
+	tkn := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Subject:   sub,
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl))},
+	)
 
 	return tkn.SignedString([]byte(signingKey))
 }

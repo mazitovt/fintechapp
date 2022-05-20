@@ -10,33 +10,34 @@ import (
 	"time"
 )
 
-const (
-	accessTTL  = 15 * time.Minute
-	refreshTTL = 30 * 24 * time.Hour
-)
-
 type Server struct {
 	userService  service.Users
 	tokenService service.Tokens
+	accessTTL    time.Duration
+	refreshTTL   time.Duration
 }
 
-func New(userService service.Users, tokenService service.Tokens) *Server {
-	return &Server{userService: userService, tokenService: tokenService}
+func New(userService service.Users, tokenService service.Tokens, accessTtl, refreshTtl time.Duration) *Server {
+	return &Server{
+		userService:  userService,
+		tokenService: tokenService,
+		accessTTL:    accessTtl,
+		refreshTTL:   refreshTtl,
+	}
 }
 
 // TODO: check error.code and response with 409 or 500 (dont disclose internal errors)
 func (s *Server) Run(addr string) error {
 	if err := fasthttp.ListenAndServe(addr, func(ctx *fasthttp.RequestCtx) {
 
+		log.Println("incoming req: ", ctx.Path())
 		// if no error occurred means response body written
 		code, err := s.Handle(ctx, string(ctx.Path()))
 		ctx.SetStatusCode(code)
 
 		if err != nil {
-			ctx.SetContentType("text/plain")
-			if _, err := fmt.Fprintf(ctx, "Server.Handle: %w", err); err != nil {
-				log.Println("writeError(): ", err)
-			}
+			log.Println("HandleErr: ", err)
+			writeJson(ctx, map[string]any{"error": err})
 		}
 
 	}); err != nil {
@@ -53,13 +54,13 @@ func (s *Server) Handle(ctx *fasthttp.RequestCtx, path string) (int, error) {
 	}
 
 	switch path {
-	case "signup":
+	case "/signup":
 		return s.signUp(ctx)
-	case "signin":
+	case "/signin":
 		return s.signIn(ctx)
-	case "refresh":
+	case "/refresh":
 		return s.refresh(ctx)
-	case "parse":
+	case "/parse":
 		return s.parse(ctx)
 	}
 
@@ -69,7 +70,7 @@ func (s *Server) Handle(ctx *fasthttp.RequestCtx, path string) (int, error) {
 // doesn't have an account
 // create account and return tokens or fail
 func (s *Server) signUp(ctx *fasthttp.RequestCtx) (int, error) {
-	args := ctx.PostArgs()
+	args := ctx.QueryArgs()
 
 	if !args.Has("email") || !args.Has("password") {
 		return fasthttp.StatusBadRequest, fmt.Errorf("not enough arguments")
@@ -91,7 +92,7 @@ func (s *Server) signUp(ctx *fasthttp.RequestCtx) (int, error) {
 // have an account
 // fail or jwt pair
 func (s *Server) signIn(ctx *fasthttp.RequestCtx) (int, error) {
-	args := ctx.PostArgs()
+	args := ctx.QueryArgs()
 
 	if !args.Has("email") || !args.Has("password") {
 		return fasthttp.StatusBadRequest, fmt.Errorf("not enough arguments")
@@ -111,9 +112,12 @@ func (s *Server) signIn(ctx *fasthttp.RequestCtx) (int, error) {
 	return s.writeTokens(ctx, userId)
 }
 
+// TODO implement blacklist of refresh tokens;
+// if refresh token has been stolen, i can't verify its owner
 // parse refresh jwt and get new jwt pair: fail or jwt pair
 func (s *Server) refresh(ctx *fasthttp.RequestCtx) (int, error) {
-	args := ctx.PostArgs()
+	// TODO where should jwt be stored: in QueryArgs or PostArgs?
+	args := ctx.QueryArgs()
 
 	if !args.Has("token") {
 		return fasthttp.StatusBadRequest, fmt.Errorf("no token argument")
@@ -143,7 +147,7 @@ func (s *Server) refresh(ctx *fasthttp.RequestCtx) (int, error) {
 
 // parse access jwt and write userID: fail or success
 func (s *Server) parse(ctx *fasthttp.RequestCtx) (int, error) {
-	args := ctx.PostArgs()
+	args := ctx.QueryArgs()
 
 	if !args.Has("token") {
 		return fasthttp.StatusBadRequest, fmt.Errorf("no token argument")
@@ -161,23 +165,27 @@ func (s *Server) parse(ctx *fasthttp.RequestCtx) (int, error) {
 	return fasthttp.StatusOK, nil
 }
 
+// TODO always returns internal error
 func (s *Server) writeTokens(ctx *fasthttp.RequestCtx, userId string) (int, error) {
 
+	// TODO maybe remove ttl from function call
 	// create new refresh token
-	refresh, err := s.tokenService.Refresh(userId, refreshTTL)
+	refresh, err := s.tokenService.Refresh(userId, s.refreshTTL)
 	if err != nil {
 		return fasthttp.StatusConflict, fmt.Errorf("TokenService.Refresh: %w", err)
 	}
 	// create new access token
-	access, err := s.tokenService.Access(userId, accessTTL)
+	access, err := s.tokenService.Access(userId, s.accessTTL)
 	if err != nil {
 		return fasthttp.StatusConflict, fmt.Errorf("TokenService.Access: %w", err)
 	}
 
 	// add refresh token to user's token list
 	// if number of token overflows limit, continue
-	// TODO: temporary ignore error
-	_ = s.userService.AddRefresh(context.Background(), userId, refresh)
+	err = s.userService.AddRefresh(context.Background(), userId, refresh)
+	if err != nil {
+		return fasthttp.StatusConflict, fmt.Errorf("Users.AddRefresh: %w ", err)
+	}
 
 	writeJson(ctx, map[string]any{"access": access, "refresh": refresh})
 

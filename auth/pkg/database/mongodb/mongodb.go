@@ -10,6 +10,7 @@ import (
 
 const timeout = 10 * time.Second
 
+// TODO add ctx
 func NewClient(uri, username, password string) (*mongo.Client, error) {
 	opts := options.Client().ApplyURI(uri)
 
@@ -26,10 +27,11 @@ func NewClient(uri, username, password string) (*mongo.Client, error) {
 	defer cancel()
 
 	err = client.Connect(ctx)
-
 	if err != nil {
 		return nil, err
 	}
+
+	//defer client.Disconnect(ctx)
 
 	err = client.Ping(context.Background(), nil)
 	if err != nil {

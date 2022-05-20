@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"github.com/mazitovt/fintechapp/auth/domain"
 	"github.com/mazitovt/fintechapp/auth/repository"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type UserService struct {
@@ -14,8 +12,8 @@ type UserService struct {
 	maxRefreshTokens int
 }
 
-func NewUserService(repo repository.Users) *UserService {
-	return &UserService{repo: repo}
+func NewUserService(repo repository.Users, maxRefreshTokens int) *UserService {
+	return &UserService{repo: repo, maxRefreshTokens: maxRefreshTokens}
 }
 
 func (s *UserService) SignUp(ctx context.Context, email, password string) (string, error) {
@@ -30,7 +28,7 @@ func (s *UserService) SignUp(ctx context.Context, email, password string) (strin
 	user := domain.User{
 		Password:      passwordHash,
 		Email:         email,
-		RefreshTokens: bson.A{},
+		RefreshTokens: []string{},
 	}
 
 	id, err := s.repo.Create(ctx, user)
@@ -42,7 +40,6 @@ func (s *UserService) SignUp(ctx context.Context, email, password string) (strin
 	}
 
 	return id, nil
-
 }
 
 func (s *UserService) SignIn(ctx context.Context, email, password string) (string, error) {
@@ -62,17 +59,17 @@ func (s *UserService) SignIn(ctx context.Context, email, password string) (strin
 		return "", err
 	}
 
-	return user.ID.String(), nil
+	return user.ID.Hex(), nil
 }
 
 func (s *UserService) AddRefresh(ctx context.Context, userId, token string) error {
 	user, err := s.repo.GetByUserId(ctx, userId)
 	if err != nil {
-		return fmt.Errorf("Users.GetById: %w", err)
+		return fmt.Errorf("Users.GetByUserId: %w", err)
 	}
 
-	if len(user.RefreshTokens) >= 5 {
-		user.RefreshTokens = primitive.A{token}
+	if len(user.RefreshTokens) >= s.maxRefreshTokens {
+		user.RefreshTokens = []string{token}
 	} else {
 		user.RefreshTokens = append(user.RefreshTokens, token)
 	}
